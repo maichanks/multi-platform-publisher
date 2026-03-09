@@ -1,0 +1,501 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+// ==================== 用户与认证 ====================
+
+model User {
+  id                String           @id @default(cuid())
+  email             String           @unique
+  emailVerified     DateTime?
+  name              String?
+  avatarUrl         String?
+  passwordHash      String?
+  oauthProvider     String?
+  oauthProviderId   String?          @unique
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  deletedAt         DateTime?
+
+  workspaceMembers  WorkspaceMember[]
+  ownedWorkspaces   Workspace[]      @relation("WorkspaceOwner")
+  createdContents   Content[]
+  aiAdaptationLogs  AIAdaptationLog[]
+  auditLogs         AuditLog[]
+  apiKeys           ApiKey[]
+
+  @@index([email])
+  @@index([deletedAt])
+}
+
+model ApiKey {
+  id               String   @id @default(cuid())
+  userId           String
+  name             String
+  keyPrefix        String
+  keyHash          String   @unique
+  lastUsedAt       DateTime?
+  lastUsedIp       String?
+  expiresAt        DateTime?
+  createdAt        DateTime @default(now())
+  revoked          Boolean  @default(false)
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+// ==================== 多租户工作区 ====================
+
+model Workspace {
+  id               String           @id @default(cuid())
+  name             String
+  slug             String           @unique
+  description      String?
+  avatarUrl        String?
+  ownerId          String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
+
+  owner            User             @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members          WorkspaceMember[]
+  socialAccounts   SocialAccount[]
+  contents         Content[]
+  tags             Tag[]
+  webhooks         Webhook[]
+  analyticsDaily   AnalyticsDaily[]
+  complianceLogs   ComplianceLog[]
+
+  @@index([ownerId])
+  @@index([slug])
+  @@index([deletedAt])
+}
+
+model WorkspaceMember {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  userId         String
+  role           WorkspaceRole
+  joinedAt       DateTime       @default(now())
+
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+enum WorkspaceRole {
+  creator
+  admin
+  approver
+  editor
+  viewer
+}
+
+// ==================== 社交账号连接 ====================
+
+model SocialAccount {
+  id                   String            @id @default(cuid())
+  workspaceId          String
+  platform             SocialPlatform
+  platformAccountId    String
+  platformUsername     String
+  platformDisplayName  String?
+  profileUrl           String?
+  avatarUrl            String?
+
+  accessTokenEncrypted String
+  refreshTokenEncrypted String?
+  tokenExpiresAt       DateTime?
+  tokenScope           String?
+
+  sessionData          Json?
+
+  status               SocialAccountStatus
+  lastSyncAt           DateTime?
+  rateLimitRemaining   Int               @default(0)
+  rateLimitResetAt     DateTime?
+  errorMessage         String?
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  workspace            Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  publishJobs          PublishJob[]
+
+  @@unique([workspaceId, platform, platformAccountId])
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([status])
+}
+
+enum SocialPlatform {
+  twitter
+  linkedin
+  reddit
+  youtube
+  xiaohongshu
+  douyin
+  facebook
+  instagram
+  tiktok
+  weibo
+}
+
+enum SocialAccountStatus {
+  connected
+  disconnected
+  expired
+  error
+  pending
+}
+
+// ==================== 内容管理与AI适配 ====================
+
+model Content {
+  id                 String           @id @default(cuid())
+  workspaceId        String
+  createdById        String
+  title              String
+  body               String           @db.Text
+  summary            String?          @db.Text
+  media              Json
+  tags               String[]
+
+  status             ContentStatus
+  errorMessage       String?
+
+  scheduledAt        DateTime?
+
+  targetPlatforms    SocialPlatform[]
+  aiAdaptationConfig Json?
+
+  adaptationResults Json?
+  publishResults     Json?
+
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  publishedAt        DateTime?
+  deletedAt          DateTime?
+
+  workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy          User             @relation(fields: [createdById], references: [id])
+  aiAdaptationLogs   AIAdaptationLog[]
+  publishJobs        PublishJob[]
+  complianceScans    ComplianceScan[]
+
+  @@index([workspaceId])
+  @@index([createdById])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([publishedAt])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+enum ContentStatus {
+  draft
+  scheduled
+  processing
+  published
+  failed
+  cancelled
+}
+
+model AIAdaptationLog {
+  id                String   @id @default(cuid())
+  contentId         String
+  platform          SocialPlatform
+  prompt            String   @db.Text
+  originalText      String   @db.Text
+  adaptedText       String   @db.Text
+  modelUsed         String
+  tokensInput       Int
+  tokensOutput      Int
+  tokensTotal       Int
+  costCents         Int
+  durationMs        Int
+  success           Boolean
+  errorMessage      String?
+  createdAt         DateTime @default(now())
+
+  content           Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([contentId])
+  @@index([createdAt])
+  @@index([modelUsed])
+}
+
+// ==================== 发布队列 ====================
+
+model PublishJob {
+  id                String           @id @default(cuid())
+  contentId         String
+  socialAccountId   String
+  platform          SocialPlatform
+  status            JobStatus
+  priority          Int              @default(0)
+
+  bullJobId         String?          @unique
+  attemptsMade      Int              @default(0)
+  maxAttempts       Int              @default(3)
+  delayUntil        DateTime?
+
+  startedAt         DateTime?
+  completedAt       DateTime?
+  result            Json?
+
+  backoffStrategy   String?
+  backoffDelayMs    Int?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  content           Content          @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  socialAccount     SocialAccount    @relation(fields: [socialAccountId], references: [id])
+
+  @@index([contentId])
+  @@index([socialAccountId])
+  @@index([status])
+  @@index([priority, delayUntil])
+  @@index([createdAt])
+}
+
+enum JobStatus {
+  pending
+  active
+  completed
+  failed
+  delayed
+  cancelled
+}
+
+// ==================== 统一分析 ====================
+
+model AnalyticsDaily {
+  id                String           @id @default(cuid())
+  workspaceId       String
+  platform          SocialPlatform?
+  date              DateTime
+  postsCount        Int
+  engagement        Json
+  audience          Json?
+  metrics           Json?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  workspace         Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, date])
+  @@index([workspaceId, date])
+  @@index([date])
+  @@index([platform])
+}
+
+model AnalyticsEvent {
+  id                String           @id @default(cuid())
+  workspaceId       String
+  contentId         String?
+  platform          SocialPlatform
+  eventType         AnalyticsEventType
+  eventData         Json
+  userId            String?
+  sessionId         String?
+  ipAddress         String?
+  userAgent         String?
+  occurredAt        DateTime         @default(now())
+
+  @@index([workspaceId, occurredAt])
+  @@index([contentId])
+  @@index([platform])
+}
+
+enum AnalyticsEventType {
+  view
+  like
+  comment
+  share
+  click
+  follow
+  impression
+}
+
+// ==================== 合规扫描 ====================
+
+model ComplianceScan {
+  id                String           @id @default(cuid())
+  contentId         String
+  workspaceId       String
+  scanType          ComplianceScanType
+  triggeredBy       String
+
+  status            ScanStatus
+  startedAt         DateTime         @default(now())
+  completedAt       DateTime?
+
+  overallRisk       RiskLevel?
+  violations        Json?
+
+  aiModelUsed       String?
+  tokensUsed        Int?
+  costCents         Int?
+
+  userOverride      Boolean          @default(false)
+  overrideReason    String?
+  overrideBy        String?
+  overrideAt        DateTime?
+
+  errorMessage      String?
+
+  content           Content          @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([contentId])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([overallRisk])
+}
+
+enum ComplianceScanType {
+  sensitive
+  copyright
+  brand_safety
+  regulatory
+}
+
+enum ScanStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+  critical
+}
+
+// ==================== 标签管理 ====================
+
+model Tag {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  name            String
+  color           String   @default("#6B7280")
+  description     String?
+  usageCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+// ==================== Webhooks ====================
+
+model Webhook {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  url             String
+  secret          String?
+  events          String[]
+  isActive        Boolean  @default(true)
+  lastSentAt      DateTime?
+  lastFailureAt   DateTime?
+  failureCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([isActive])
+}
+
+// ==================== 审计日志 ====================
+
+model AuditLog {
+  id              String           @id @default(cuid())
+  workspaceId     String?
+  userId          String?
+  action          AuditAction
+  resourceType    AuditResource
+  resourceId      String?
+
+  beforeState     Json?
+  afterState      Json?
+  changes         Json?
+
+  ipAddress       String?
+  userAgent       String?
+  requestId       String?
+
+  createdAt       DateTime         @default(now())
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}
+
+enum AuditAction {
+  user_created
+  user_updated
+  user_deleted
+  workspace_created
+  workspace_updated
+  workspace_deleted
+  member_invited
+  member_role_changed
+  member_removed
+  social_account_connected
+  social_account_disconnected
+  social_account_token_refreshed
+  content_created
+  content_updated
+  content_deleted
+  content_published
+  ai_adaptation_run
+  compliance_scan_run
+  compliance_override
+  api_key_created
+  api_key_revoked
+  webhook_created
+  webhook_updated
+  webhook_deleted
+  system_config_changed
+  export_data_requested
+  data_deletion_requested
+}
+
+enum AuditResource {
+  user
+  workspace
+  member
+  social_account
+  content
+  ai_adaptation
+  compliance_scan
+  api_key
+  webhook
+  system
+}
