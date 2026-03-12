@@ -26,8 +26,8 @@ FROM node:20-alpine AS production
 # Set working directory
 WORKDIR /usr/src/app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and netcat (for wait-for-it)
+RUN apk add --no-cache dumb-init netcat-openbsd
 
 # Copy package.json and package-lock.json
 COPY package*.json ./
@@ -38,6 +38,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy built application and prisma from builder stage
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/prisma ./prisma
+# Copy wait-for-it script
+COPY scripts/wait-for-it.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/wait-for-it.sh
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs
@@ -54,5 +57,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start the application
-CMD ["node", "dist/main"]
+# Wait for database then start the application
+CMD ["sh", "-c", "wait-for-it.sh postgres && node dist/main"]

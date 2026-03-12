@@ -1,12 +1,16 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import * as puppeteer from 'puppeteer';
-import { 
-  xhsSelectors, 
-  findElementWithFallbacks, 
+import {
+  xhsSelectors,
+  findElementWithFallbacks,
   waitForPageLoad,
   PageSelectors,
-  ElementConfig 
+  ElementConfig
 } from './selectors/xhs.selectors';
 
 /**
@@ -443,10 +447,17 @@ export class PuppeteerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Upload a single image
+   * Upload a single image to Xiaohongshu.
+   * If imageUrl is a remote URL, it will be downloaded to a temporary file first.
    */
   private async uploadImage(imageUrl: string): Promise<void> {
     try {
+      let filePath = imageUrl;
+      // If imageUrl is a remote URL, download it to a temp file
+      if (imageUrl.startsWith('http')) {
+        filePath = await this.downloadImageToTemp(imageUrl);
+      }
+
       // Find the upload input (typically hidden file input)
       const uploadInput = await findElementWithFallbacks(this.page, xhsSelectors.createPost.imageUpload, this.logger);
       
@@ -454,21 +465,32 @@ export class PuppeteerService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Image upload element not found');
       }
 
-      // Determine if it's a file input or button
+      // Check if it's a file input
       const tagName = await this.page.evaluate(el => el.tagName, uploadInput);
+      const inputType = await this.page.evaluate(el => el.type, uploadInput);
       
-      if (tagName === 'INPUT' && (await this.page.evaluate(el => el.type, uploadInput)) === 'file') {
-        // Direct file upload
-        await uploadInput.uploadFile(imageUrl); // imageUrl should be local file path
+      if (tagName === 'INPUT' && inputType === 'file') {
+        // Use setInputFiles to upload the file (works with local paths)
+        await this.page.setInputFiles(uploadInput, filePath);
       } else {
-        // Click to open file dialog, then handle
-        await uploadInput.click();
-        await this.page.waitForTimeout(1000);
-        
-        // For remote images, we may need to download first or use alternative method
-        // In a real implementation, you'd handle remote URLs by downloading or pasting
-        this.logger.warn('Remote image upload not fully implemented - needs file download or paste method');
+        // If not a file input, click to trigger file dialog and then set files via page.waitForFileChooser?
+        // Fallback: try to click and then use page.setInputFiles on the opened dialog's input (not straightforward)
+        // For simplicity, we assume it's a file input or we can directly set files.
+        this.logger.warn('Upload element is not a file input; attempting to set files directly anyway');
+        await this.page.setInputFiles(uploadInput, filePath);
       }
+
+      // If we downloaded a temp file, clean up after a short delay
+      if (filePath !== imageUrl && filePath.startsWith(os.tmpdir())) {
+        // Wait a bit to ensure upload completed
+        setTimeout(() => {
+          fs.unlink(filePath, err => {
+            if (err) this.logger.warn('Failed to delete temp image', err);
+          });
+        }, 5000); // delete after 5 seconds
+      }
+
+      this.logger.debug('Image uploaded successfully', { imageUrl });
     } catch (error: any) {
       this.logger.error('Image upload failed', { error: error.message, imageUrl });
       throw error;

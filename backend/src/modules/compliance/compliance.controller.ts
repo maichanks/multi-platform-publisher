@@ -10,11 +10,12 @@ import {
 } from '@nestjs/common';
 import { ComplianceService } from './compliance.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionsGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
 
 @Controller('compliance')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 export class ComplianceController {
   constructor(private readonly complianceService: ComplianceService) {}
 

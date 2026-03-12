@@ -1,11 +1,11 @@
-import { Injectable, HttpService, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, HttpService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import { PlatformAdapter } from './platform-adapter.interface';
 import { PlatformCredentials, PlatformAccountInfo, PublishResult } from './platform-adapter.interface';
 import { LoggerService } from '../../common/logger/logger.service';
 import { RateLimiterService } from '../services/rate-limiter.service';
 import { withRetry, isRetryableError, PLATFORM_RETRY_CONFIGS } from './retry.policy';
-import * as crypto from 'crypto';
 
 @Injectable()
 export class TwitterAdapter implements PlatformAdapter {
@@ -258,17 +258,97 @@ export class TwitterAdapter implements PlatformAdapter {
     credentials: PlatformCredentials,
     media: { url: string; type: 'image' | 'video' },
   ): Promise<string | null> {
-    this.logger.warn('TwitterAdapter: Media upload not fully implemented', {
+    this.logger.log('TwitterAdapter: Uploading media', {
       platform: this.platform,
       mediaType: media.type,
       mediaUrl: media.url,
     });
-    // For MVP, we'll skip actual media upload and just return null
-    // Full implementation would:
-    // 1. Download media from URL
-    // 2. Upload to Twitter's media upload endpoint (INIT, APPEND, FINALIZE)
-    // 3. Poll for processing
-    // 4. Return media_id
-    return null;
+
+    try {
+      // Download media from URL
+      const response = await axios.get(media.url, { responseType: 'arraybuffer' });
+      const mediaBuffer = Buffer.from(response.data, 'binary');
+      const totalBytes = mediaBuffer.length;
+      const contentType = response.headers['content-type'] || (media.type === 'image' ? 'image/jpeg' : 'video/mp4');
+
+      // Only images are supported in this implementation (videos require async processing)
+      if (media.type === 'video') {
+        this.logger.warn('TwitterAdapter: Video upload not fully supported, please use images');
+        return null;
+      }
+
+      // Step 1: INIT
+      const initResponse = await withRetry(
+        async () => {
+          await this.rateLimiter.consume(this.platform, 'media_init', 1);
+          return this.httpService
+            .post('https://upload.twitter.com/1.1/media/upload.json', new URLSearchParams({
+              command: 'INIT',
+              total_bytes: totalBytes.toString(),
+              media_type: contentType,
+              media_category: 'tweet_image',
+            }), {
+              headers: {
+                'Authorization': `Bearer ${credentials.accessToken}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+            })
+            .toPromise();
+        },
+        PLATFORM_RETRY_CONFIGS.twitter,
+        isRetryableError
+      );
+
+      const mediaId = initResponse.data.media_id_string;
+      this.logger.debug('TwitterAdapter: Media INIT successful', { mediaId });
+
+      // Step 2: APPEND (single chunk)
+      await withRetry(
+        async () => {
+          await this.rateLimiter.consume(this.platform, 'media_append', 1);
+          return this.httpService.post(
+            `https://upload.twitter.com/1.1/media/upload.json?command=APPEND&media_id=${mediaId}&segment_index=0`,
+            mediaBuffer,
+            {
+              headers: {
+                'Authorization': `Bearer ${credentials.accessToken}`,
+                'Content-Type': contentType,
+              },
+            }
+          ).toPromise();
+        },
+        PLATFORM_RETRY_CONFIGS.twitter,
+        isRetryableError
+      );
+      this.logger.debug('TwitterAdapter: Media APPEND successful');
+
+      // Step 3: FINALIZE
+      await withRetry(
+        async () => {
+          await this.rateLimiter.consume(this.platform, 'media_finalize', 1);
+          return this.httpService.post(
+            `https://upload.twitter.com/1.1/media/upload.json?command=FINALIZE&media_id=${mediaId}`,
+            null,
+            {
+              headers: {
+                'Authorization': `Bearer ${credentials.accessToken}`,
+              },
+            }
+          ).toPromise();
+        },
+        PLATFORM_RETRY_CONFIGS.twitter,
+        isRetryableError
+      );
+      this.logger.debug('TwitterAdapter: Media FINALIZE successful');
+
+      return mediaId;
+    } catch (error: any) {
+      this.logger.error('TwitterAdapter: Media upload failed', {
+        platform: this.platform,
+        error: error.message,
+        code: error.response?.data?.type,
+      });
+      return null;
+    }
   }
 }

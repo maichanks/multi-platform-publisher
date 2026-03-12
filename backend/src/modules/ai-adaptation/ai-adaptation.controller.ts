@@ -4,12 +4,13 @@ import { AIAdaptationService } from './services/ai-adaptation.service';
 import { CreateAdaptationJobDto } from './dto/create-adaptation-job.dto';
 import { AdaptationLogDto } from './dto/adaptation-log.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
 
 @ApiTags('AI Adaptation')
 @ApiBearerAuth()
 @Controller('ai-adaptation')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard)
 export class AIAdaptationController {
   constructor(private readonly aiAdaptationService: AIAdaptationService) {}
 
@@ -76,4 +77,4 @@ export class AIAdaptationController {
     const logs = await this.aiAdaptationService.getAdaptationLogs(contentId, targetWorkspaceId);
     return { success: true, data: logs };
   }
-})
+}

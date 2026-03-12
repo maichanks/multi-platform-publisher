@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
+import { ActivityAction } from '../../common/activity-enums';
 import { ConnectionRequestDto } from './dto/connection-request.dto';
 import { SocialAccountDto } from './dto/social-account.dto';
 import { EncryptorService } from '../common/encryptor.service';
@@ -18,6 +20,7 @@ export class SocialAccountsService {
     private readonly configService: ConfigService,
     private readonly encryptor: EncryptorService,
     private readonly adapterFactory: SocialPlatformAdapterFactory,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   async connect(
@@ -25,9 +28,10 @@ export class SocialAccountsService {
     userId: string,
     platform: string,
     connectionData: any,
+    tenantId?: string,
   ): Promise<SocialAccountDto> {
-    // Verify workspace membership
-    const membership = await this.checkWorkspaceAccess(workspaceId, userId);
+    // Verify workspace membership and optionally tenant
+    const membership = await this.checkWorkspaceAccess(workspaceId, userId, tenantId);
     if (!membership) {
       throw new ForbiddenException('No access to workspace');
     }
@@ -62,11 +66,21 @@ export class SocialAccountsService {
       },
     });
 
+    // Log activity
+    await this.activityLog.log(
+      workspaceId,
+      userId,
+      ActivityAction.SOCIAL_ACCOUNT_CONNECTED,
+      'social_account',
+      socialAccount.id,
+      { platform, platformUsername: tokens.platformUsername },
+    );
+
     return this.toDto(socialAccount);
   }
 
-  async disconnect(workspaceId: string, userId: string, accountId: string): Promise<void> {
-    await this.checkWorkspaceAccess(workspaceId, userId);
+  async disconnect(workspaceId: string, userId: string, accountId: string, tenantId?: string): Promise<void> {
+    await this.checkWorkspaceAccess(workspaceId, userId, tenantId);
 
     const account = await this.prisma.socialAccount.findFirst({
       where: { id: accountId, workspaceId },
@@ -79,6 +93,16 @@ export class SocialAccountsService {
     await this.prisma.socialAccount.delete({
       where: { id: accountId },
     });
+
+    // Log activity
+    await this.activityLog.log(
+      workspaceId,
+      userId,
+      ActivityAction.SOCIAL_ACCOUNT_DISCONNECTED,
+      'social_account',
+      accountId,
+      { platform: account.platform, platformUsername: account.platformUsername },
+    );
   }
 
   async getAccessToken(accountId: string, workspaceId: string): Promise<string> {
@@ -94,13 +118,21 @@ export class SocialAccountsService {
     return this.encryptor.decrypt(account.accessTokenEncrypted);
   }
 
-  async refreshToken(accountId: string): Promise<void> {
+  async refreshToken(accountId: string, userId?: string, tenantId?: string): Promise<void> {
     const account = await this.prisma.socialAccount.findUnique({
       where: { id: accountId },
     });
 
     if (!account || !account.refreshTokenEncrypted) {
       throw new BadRequestException('Cannot refresh token - no refresh token available');
+    }
+
+    // If userId provided, verify access
+    if (userId) {
+      const membership = await this.checkWorkspaceAccess(account.workspaceId, userId, tenantId);
+      if (!membership) {
+        throw new ForbiddenException('No access to refresh this token');
+      }
     }
 
     const refreshToken = this.encryptor.decrypt(account.refreshTokenEncrypted);
@@ -119,6 +151,18 @@ export class SocialAccountsService {
         tokenExpiresAt: newTokens.expiresAt,
       },
     });
+
+    // Log activity if userId provided
+    if (userId) {
+      await this.activityLog.log(
+        account.workspaceId,
+        userId,
+        ActivityAction.SOCIAL_ACCOUNT_TOKEN_REFRESHED,
+        'social_account',
+        accountId,
+        { platform: account.platform },
+      );
+    }
   }
 
   async listByWorkspace(workspaceId: string, userId: string): Promise<SocialAccountDto[]> {
@@ -154,7 +198,17 @@ export class SocialAccountsService {
     };
   }
 
-  private async checkWorkspaceAccess(workspaceId: string, userId: string): Promise<boolean> {
+  private async checkWorkspaceAccess(workspaceId: string, userId: string, tenantId?: string): Promise<boolean> {
+    // If tenantId provided, verify workspace belongs to tenant
+    if (tenantId) {
+      const workspace = await this.prisma.workspace.findFirst({
+        where: { id: workspaceId, tenantId },
+      });
+      if (!workspace) {
+        return false;
+      }
+    }
+    
     const membership = await this.prisma.workspaceMember.findFirst({
       where: { workspaceId, userId },
     });

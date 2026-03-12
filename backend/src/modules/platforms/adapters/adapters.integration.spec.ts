@@ -1346,3 +1346,4 @@ describe('XiaohongshuAdapter Integration (Browser Automation)', () => {
   });
 
   // Additional edge case tests could be added as needed
+});

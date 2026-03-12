@@ -21,13 +21,14 @@ import { PublishContentDto } from './dto/publish-content.dto';
 import { ScheduleContentDto } from './dto/schedule-content.dto';
 import { ContentStatsDto } from './dto/content-stats.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
 import { ContentStatus } from '@prisma/client';
 
 @ApiTags('Content')
 @ApiBearerAuth()
 @Controller('content')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard)
 export class ContentController {
   constructor(private readonly contentService: ContentService) {}
 

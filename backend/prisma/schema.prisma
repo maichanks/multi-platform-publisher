@@ -29,6 +29,8 @@ model User {
   workspaceMembers  WorkspaceMember[]
   ownedWorkspaces   Workspace[]      @relation("WorkspaceOwner")
   createdContents   Content[]
+  userRoles         UserRole[]
+  activityLogs      ActivityLog[]
   aiAdaptationLogs  AIAdaptationLog[]
   auditLogs         AuditLog[]
   apiKeys           ApiKey[]
@@ -55,6 +57,32 @@ model ApiKey {
   @@index([keyHash])
 }
 
+enum TenantRole {
+  admin
+  editor
+  viewer
+}
+
+model Tenant {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  settings      Json?
+
+  workspaces    Workspace[]
+  userRoles     UserRole[]
+  activityLogs  ActivityLog[]
+  complianceLogs ComplianceLog[]
+  aiAdaptationLogs AIAdaptationLog[]
+  auditLogs     AuditLog[]
+
+  @@index([slug])
+  @@index([deletedAt])
+}
+
 // ==================== 多租户工作区 ====================
 
 model Workspace {
@@ -67,19 +95,24 @@ model Workspace {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   deletedAt        DateTime?
+  tenantId         String
 
   owner            User             @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   members          WorkspaceMember[]
   socialAccounts   SocialAccount[]
   contents         Content[]
   tags             Tag[]
   webhooks         Webhook[]
   analyticsDaily   AnalyticsDaily[]
+  activityLogs     ActivityLog[]
   complianceLogs   ComplianceLog[]
+  auditLogs        AuditLog[]
 
   @@index([ownerId])
   @@index([slug])
   @@index([deletedAt])
+  @@index([tenantId])
 }
 
 model WorkspaceMember {
@@ -103,6 +136,23 @@ enum WorkspaceRole {
   approver
   editor
   viewer
+}
+
+model UserRole {
+  id            String   @id @default(cuid())
+  userId        String
+  tenantId      String
+  role          TenantRole
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([userId])
+  @@index([tenantId])
 }
 
 // ==================== 社交账号连接 ====================
@@ -218,6 +268,8 @@ enum ContentStatus {
 model AIAdaptationLog {
   id                String   @id @default(cuid())
   contentId         String
+  userId            String?
+  tenantId          String?
   platform          SocialPlatform
   prompt            String   @db.Text
   originalText      String   @db.Text
@@ -233,8 +285,12 @@ model AIAdaptationLog {
   createdAt         DateTime @default(now())
 
   content           Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  user              User?    @relation(fields: [userId], references: [id])
+  tenant            Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([contentId])
+  @@index([userId])
+  @@index([tenantId])
   @@index([createdAt])
   @@index([modelUsed])
 }
@@ -384,6 +440,20 @@ enum ScanStatus {
   failed
 }
 
+enum ComplianceSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum ComplianceStatus {
+  passed
+  warning
+  failed
+  overridden
+}
+
 enum RiskLevel {
   low
   medium
@@ -434,6 +504,7 @@ model Webhook {
 
 model AuditLog {
   id              String           @id @default(cuid())
+  tenantId        String?
   workspaceId     String?
   userId          String?
   action          AuditAction
@@ -450,6 +521,11 @@ model AuditLog {
 
   createdAt       DateTime         @default(now())
 
+  user            User?            @relation(fields: [userId], references: [id])
+  workspace       Workspace?       @relation(fields: [workspaceId], references: [id])
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
   @@index([workspaceId])
   @@index([userId])
   @@index([action])
@@ -498,4 +574,68 @@ enum AuditResource {
   api_key
   webhook
   system
+}
+
+// ==================== 团队协作活动 ====================
+
+enum ActivityAction {
+  member_invited
+  member_invite_accepted
+  member_role_changed
+  member_removed
+  content_created
+  content_updated
+  content_published
+  content_deleted
+  social_account_connected
+  social_account_disconnected
+  ai_adaptation_run
+  compliance_scan_run
+  compliance_override
+  export_data_requested
+  data_deletion_requested
+}
+
+model ActivityLog {
+  id            String           @id @default(cuid())
+  tenantId      String?
+  workspaceId   String?
+  userId        String?
+  action        ActivityAction
+  resourceType  String
+  resourceId    String?
+  metadata      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime         @default(now())
+
+  user          User?            @relation(fields: [userId], references: [id])
+  workspace     Workspace?       @relation(fields: [workspaceId], references: [id])
+  tenant        Tenant?          @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ComplianceLog {
+  id            String   @id @default(cuid())
+  tenantId      String
+  workspaceId   String
+  ruleId        String
+  severity      ComplianceSeverity
+  status        ComplianceStatus
+  details       Json?
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
 }

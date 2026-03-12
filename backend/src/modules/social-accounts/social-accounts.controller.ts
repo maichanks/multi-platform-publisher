@@ -20,14 +20,20 @@ import { SocialAccountsService } from './social-accounts.service';
 import { ConnectionRequestDto } from './dto/connection-request.dto';
 import { SocialAccountDto } from './dto/social-account.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
+import { SocialPlatformAdapterFactory } from '../platforms/adapters/factory';
+import { BadRequestException } from '@nestjs/common';
 
 @ApiTags('Social Accounts')
 @ApiBearerAuth()
 @Controller('social-accounts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard)
 export class SocialAccountsController {
-  constructor(private readonly socialAccountsService: SocialAccountsService) {}
+  constructor(
+    private readonly socialAccountsService: SocialAccountsService,
+    private readonly adapterFactory: SocialPlatformAdapterFactory,
+  ) {}
 
   @Post(':platform/connect')
   @PermissionChecker('SOCIAL_ACCOUNT_CONNECT')
@@ -98,6 +104,7 @@ export class SocialAccountsController {
       },
     },
   })
+  @PermissionChecker('SOCIAL_ACCOUNT_READ')
   async getStatus(
     @Param('accountId') accountId: string,
     @Req() req,
@@ -112,5 +119,32 @@ export class SocialAccountsController {
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
   async refreshToken(@Param('accountId') accountId: string) {
     return this.socialAccountsService.refreshToken(accountId);
+  }
+
+  @Get(':platform/qr')
+  @PermissionChecker('SOCIAL_ACCOUNT_CONNECT')
+  @ApiOperation({ summary: 'Get QR code for Xiaohongshu login' })
+  @ApiParam({ name: 'platform', description: 'Platform name (currently only xiaohongshu supported)' })
+  @ApiResponse({
+    status: 200,
+    description: 'QR code data',
+    schema: {
+      type: 'object',
+      properties: {
+        sessionToken: { type: 'string' },
+        qrCode: { type: 'string' },
+      },
+    },
+  })
+  async getPlatformQR(@Param('platform') platform: string, @Req() req: any) {
+    if (platform !== 'xiaohongshu') {
+      throw new BadRequestException('QR code login is only supported for xiaohongshu');
+    }
+    const adapter = this.adapterFactory.getAdapter(platform) as any;
+    if (typeof adapter.startQRLogin !== 'function') {
+      throw new NotImplementedException('QR login not implemented for this platform');
+    }
+    const qrData = await adapter.startQRLogin();
+    return { success: true, data: qrData };
   }
 }

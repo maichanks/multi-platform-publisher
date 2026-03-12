@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Platform Publisher - 预览</title>
+  <!-- Ant Design CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5.12.8/dist/reset.css" />
+  <style>
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    #root { height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Ant Design -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/antd@5.12.8/dist/antd.min.js"></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const { Form, Input, Button, Card, message, Table, Space, Popconfirm, Layout, Menu, BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate, useLocation, Row, Col, Statistic, List, Tag, Progress, Alert, Tabs, Switch } = antd;
+    const { Header, Sider, Content } = Layout;
+
+    // --- Auth Service ---
+    const API_URL = 'http://localhost:3000';
+    const authService = {
+      login(email, password) {
+        return fetch(`${API_URL}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        }).then(async (resp) => {
+          if (!resp.ok) throw new Error('Login failed');
+          const data = await resp.json();
+          localStorage.setItem('token', data.access_token);
+        });
+      },
+      logout() { localStorage.removeItem('token'); },
+      getToken() { return localStorage.getItem('token'); }
+    };
+
+    // --- Components ---
+    const AdminLayout = () => {
+      const location = useLocation();
+      const menuItems = [
+        { key: '/dashboard', label: '仪表盘' },
+        { key: '/content', label: '内容管理' },
+        { key: '/publish', label: '发布队列' },
+        { key: '/settings/platforms', label: '平台设置' },
+      ];
+      return (
+        <Layout style={{ minHeight: '100vh' }}>
+          <Sider theme="dark">
+            <div style={{ height: 32, margin: 16, background: 'rgba(255,255,255,0.2)' }} />
+            <Menu theme="dark" selectedKeys={[location.pathname]} items={menuItems} mode="inline" />
+          </Sider>
+          <Layout>
+            <Header style={{ background: '#fff', padding: 0 }} />
+            <Content style={{ margin: '24px 16px', padding: 24, background: '#fff', minHeight: 280 }}>
+              <Outlet />
+            </Content>
+          </Layout>
+        </Layout>
+      );
+    };
+
+    const ProtectedRoute = ({ children }) => {
+      const token = localStorage.getItem('token');
+      if (!token) return <Navigate to="/login" replace />;
+      return children;
+    };
+
+    const Login = () => {
+      const navigate = useNavigate();
+      const onFinish = async (values) => {
+        try {
+          await authService.login(values.email, values.password);
+          message.success('登录成功');
+          navigate('/dashboard');
+        } catch (error) {
+          message.error('登录失败');
+        }
+      };
+      return (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          <Card title="管理员登录" style={{ width: 400 }}>
+            <Form onFinish={onFinish} autoComplete="off">
+              <Form.Item name="email" rules={[{ required: true, message: '请输入邮箱' }]}>
+                <Input prefix={<span>📧</span>} placeholder="邮箱" />
+              </Form.Item>
+              <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+                <Input.Password prefix={<span>🔒</span>} placeholder="密码" />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" block>登录</Button>
+              </Form.Item>
+            </Form>
+          </Card>
+        </div>
+      );
+    };
+
+    const Dashboard = () => (
+      <div>
+        <h2>仪表盘</h2>
+        <Row gutter={16}>
+          <Col span={8}><Card><Statistic title="总内容数" value={0} prefix={<span>📄</span>} /></Card></Col>
+          <Col span={8}><Card><Statistic title="本月发布" value={0} prefix={<span>📅</span>} /></Card></Col>
+          <Col span={8}><Card><Statistic title="活跃用户" value={0} prefix={<span>👥</span>} /></Card></Col>
+        </Row>
+      </div>
+    );
+
+    const ContentList = () => {
+      const columns = [
+        { title: 'ID', dataIndex: 'id', key: 'id' },
+        { title: '标题', dataIndex: 'title', key: 'title' },
+        { title: '状态', dataIndex: 'status', key: 'status', render: (s) => s === 'draft' ? '草稿' : s === 'published' ? '已发布' : '定时' },
+        { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt' },
+        { title: '操作', key: 'actions', render: () => <Space><Button type="link">编辑</Button><Popconfirm title="确定删除?"><Button type="link" danger>删除</Button></Popconfirm></Space> }
+      ];
+      const data = [{ id: '1', title: '示例内容', status: 'draft', createdAt: '2026-03-10' }];
+      return (
+        <div>
+          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+            <h2>内容管理</h2>
+            <Button type="primary">创建内容</Button>
+          </div>
+          <Table rowKey="id" columns={columns} dataSource={data} pagination={{ pageSize: 10 }} />
+        </div>
+      );
+    };
+
+    const ContentCreate = () => {
+      const [loading, setLoading] = useState(false);
+      const navigate = useNavigate();
+      const onFinish = async (values) => {
+        setLoading(true);
+        try {
+          await new Promise(r => setTimeout(r, 1000));
+          message.success('内容创建成功（模拟）');
+          navigate('/content');
+        } catch { message.error('创建失败'); }
+        finally { setLoading(false); }
+      };
+      return (
+        <Card title="创建内容">
+          <Form layout="vertical" onFinish={onFinish}>
+            <Form.Item name="title" label="标题" rules={[{ required: true }]}>
+              <Input placeholder="内容标题" />
+            </Form.Item>
+            <Form.Item name="content" label="正文" rules={[{ required: true }]}>
+              <Input.TextArea rows={12} placeholder="内容正文（支持富文本标记）" />
+            </Form.Item>
+            <Form.Item name="platform" label="发布平台">
+              <Select placeholder="选择目标平台">
+                <Option value="xiaohongshu">小红书</Option>
+                <Option value="twitter">Twitter</Option>
+                <Option value="linkedin">LinkedIn</Option>
+                <Option value="reddit">Reddit</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" htmlType="submit" loading={loading}>创建内容</Button>
+            </Form.Item>
+          </Form>
+        </Card>
+      );
+    };
+
+    const ContentEdit = () => (
+      <Card title="编辑内容" extra={<Button>保存</Button>}>
+        <p>内容编辑表单（待实现）</p>
+      </Card>
+    );
+
+    const PublishingQueue = () => {
+      const jobs = [
+        { id: '1', title: '示例发布任务', status: 'pending', progress: 0 },
+        { id: '2', title: '另一任务', status: 'processing', progress: 45 },
+        { id: '3', title: '已完成任务', status: 'completed', progress: 100 },
+      ];
+      const statusMap = {
+        pending: { color: 'default', text: '等待中' },
+        processing: { color: 'processing', text: '处理中' },
+        completed: { color: 'success', text: '已完成' },
+      };
+      return (
+        <Card title="发布队列">
+          <List
+            itemLayout="horizontal"
+            dataSource={jobs}
+            renderItem={job => {
+              const s = statusMap[job.status];
+              return (
+                <List.Item
+                  actions={[<Button key="cancel" size="small" type="link">取消</Button>, <Button key="retry" size="small" type="link">重试</Button>]}
+                >
+                  <List.Item.Meta title={job.title} description={<Tag color={s.color}>{s.text}</Tag>} />
+                  {job.status === 'processing' && <Progress percent={job.progress} />}
+                </List.Item>
+              );
+            }}
+          />
+        </Card>
+      );
+    };
+
+    const PlatformSettings = () => {
+      const [activeTab, setActiveTab] = useState('xiaohongshu');
+      const [loading, setLoading] = useState(false);
+      const onSave = async (values) => {
+        setLoading(true);
+        try { await new Promise(r => setTimeout(r, 800)); message.success('配置已保存（模拟）'); } finally { setLoading(false); }
+      };
+      const renderForm = (p) => {
+        switch (p) {
+          case 'xiaohongshu':
+            return (
+              <>
+                <Form.Item name="appId" label="App ID" rules={[{ required: true }]}><Input placeholder="小红书 App ID" /></Form.Item>
+                <Form.Item name="appSecret" label="App Secret" rules={[{ required: true }]}><Input.Password placeholder="小红书 App Secret" /></Form.Item>
+                <Form.Item name="loginMode" label="登录方式"><Input placeholder="qr 或 credentials" /></Form.Item>
+              </>
+            );
+          case 'twitter':
+            return (
+              <>
+                <Form.Item name="apiKey" label="API Key" rules={[{ required: true }]}><Input placeholder="Twitter API Key" /></Form.Item>
+                <Form.Item name="apiSecret" label="API Secret" rules={[{ required: true }]}><Input.Password placeholder="Twitter API Secret" /></Form.Item>
+                <Form.Item name="accessToken" label="Access Token"><Input placeholder="Twitter Access Token" /></Form.Item>
+              </>
+            );
+          case 'linkedin':
+            return (
+              <>
+                <Form.Item name="clientId" label="Client ID" rules={[{ required: true }]}><Input placeholder="LinkedIn Client ID" /></Form.Item>
+                <Form.Item name="clientSecret" label="Client Secret" rules={[{ required: true }]}><Input.Password placeholder="LinkedIn Client Secret" /></Form.Item>
+              </>
+            );
+          case 'reddit':
+            return (
+              <>
+                <Form.Item name="clientId" label="Client ID" rules={[{ required: true }]}><Input placeholder="Reddit Client ID" /></Form.Item>
+                <Form.Item name="clientSecret" label="Client Secret" rules={[{ required: true }]}><Input.Password placeholder="Reddit Client Secret" /></Form.Item>
+                <Form.Item name="userAgent" label="User Agent"><Input placeholder="Reddit User Agent" /></Form.Item>
+              </>
+            );
+          default: return <p>平台配置开发中</p>;
+        }
+      };
+      const tabs = [
+        { key: 'xiaohongshu', label: '小红书' },
+        { key: 'twitter', label: 'Twitter' },
+        { key: 'linkedin', label: 'LinkedIn' },
+        { key: 'reddit', label: 'Reddit' },
+      ];
+      return (
+        <Card title="平台设置">
+          <Alert message="配置说明" description="填写各平台的 API 凭证以启用发布功能。完成后点击保存并测试连接。" type="info" style={{ marginBottom: 16 }} />
+          <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabs} />
+          <Form layout="vertical" onFinish={onSave} style={{ marginTop: 24 }}>
+            {renderForm(activeTab)}
+            <Form.Item><Button type="primary" htmlType="submit" loading={loading}>保存配置</Button><Button style={{ marginLeft: 8 }}>测试连接</Button></Form.Item>
+          </Form>
+        </Card>
+      );
+    };
+
+    // --- Main App ---
+    const App = () => {
+      return (
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={
+              <ProtectedRoute>
+                <AdminLayout />
+              </ProtectedRoute>
+            }>
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="content" element={<ContentList />} />
+              <Route path="content/create" element={<ContentCreate />} />
+              <Route path="content/edit/:id" element={<ContentEdit />} />
+              <Route path="publish" element={<PublishingQueue />} />
+              <Route path="settings/platforms" element={<PlatformSettings />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -861,7 +861,7 @@ export async function findElementWithFallbacks(
     const timeout = strategy.timeout || 30000;
 
     try {
-      let element:
+      let element: any = null;
 
       // Try CSS selector
       if (strategy.css) {

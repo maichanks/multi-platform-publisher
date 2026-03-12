@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import { PlatformAdapter, PlatformCredentials, PlatformAccountInfo, PublishResult } from './platform-adapter.interface';
 import { PuppeteerService } from '../browser-automation/puppeteer.service';
 import { RateLimiterService } from '../services/rate-limiter.service';
@@ -20,6 +21,7 @@ export class XiaohongshuAdapter implements PlatformAdapter, OnModuleInit, OnModu
   private readonly logger = new Logger(XiaohongshuAdapter.name);
   private sessionInitialized = false;
   private isLoggedIn = false;
+  private qrSessions: Map<string, number> = new Map(); // sessionId -> startTime
 
   constructor(
     private readonly puppeteerService: PuppeteerService,
@@ -59,8 +61,39 @@ export class XiaohongshuAdapter implements PlatformAdapter, OnModuleInit, OnModu
     try {
       // Check which login method is provided
       if (data.sessionToken) {
-        // Future: QR code session token
-        throw new Error('QR code login not yet implemented');
+        // QR code login: wait for login completion
+        const sessionId = data.sessionToken;
+        if (!this.qrSessions.has(sessionId)) {
+          throw new Error('Invalid QR session token');
+        }
+
+        // Poll for login status, up to 2 minutes
+        const timeoutMs = 2 * 60 * 1000;
+        const pollInterval = 2000;
+        const start = Date.now();
+
+        while (Date.now() - start < timeoutMs) {
+          const loggedIn = await this.puppeteerService.checkIfLoggedIn();
+          if (loggedIn) {
+            this.qrSessions.delete(sessionId);
+            this.isLoggedIn = true;
+            this.sessionInitialized = true;
+            // Get account info
+            const accountInfo = await this.getAccountInfo('session');
+            this.logger.log('QR login successful', { sessionId });
+            return {
+              accessToken: 'xhs-session',
+              refreshToken: undefined,
+              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              scope: 'publish',
+              ...accountInfo,
+            };
+          }
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        this.qrSessions.delete(sessionId);
+        throw new Error('QR login timeout');
       } else if (data.cookie) {
         // Cookie-based login - set cookies and verify
         await this.loginWithCookie(data.cookie);

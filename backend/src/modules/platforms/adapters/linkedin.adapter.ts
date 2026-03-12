@@ -1,5 +1,6 @@
 import { Injectable, HttpService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import axios from 'axios';
 import { PlatformAdapter } from './platform-adapter.interface';
 import { PlatformCredentials, PlatformAccountInfo, PublishResult } from './platform-adapter.interface';
 import { LoggerService } from '../../common/logger/logger.service';
@@ -339,17 +340,82 @@ export class LinkedInAdapter implements PlatformAdapter {
     }
   }
 
-  private async uploadImage(credentials: PlatformCredentials, imageUrl: string): Promise<{ uploadMechanism: { com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest: { uploadUrl: string } } } | null> {
-    this.logger.warn('LinkedInAdapter: Image upload not fully implemented', {
-      platform: this.platform,
-      imageUrl,
-    });
-    // For MVP, this is a simplified placeholder
-    // Full implementation would:
-    // 1. Fetch image from URL
-    // 2. Call LinkedIn's registerUpload API to get upload URL
-    // 3. Upload binary data
-    // 4. Return the image URN
-    return null;
+  private async uploadImage(
+    credentials: PlatformCredentials,
+    imageUrl: string,
+  ): Promise<string | null> {
+    this.logger.log('LinkedInAdapter: Uploading image', { imageUrl });
+
+    try {
+      // Download image from URL
+      const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      const imageBuffer = Buffer.from(response.data, 'binary');
+      const contentType = response.headers['content-type'] || 'image/jpeg';
+
+      // Get the user's Person URN using getAccountInfo (which returns platformAccountId)
+      const accountInfo = await this.getAccountInfo(credentials.accessToken);
+      const personUrn = `urn:li:person:${accountInfo.platformAccountId}`;
+      if (accountInfo.platformAccountId === 'unknown') {
+        throw new Error('Cannot determine LinkedIn user ID for image upload');
+      }
+
+      // Step 1: Register upload
+      const registerResponse = await withRetry(
+        async () => {
+          await this.rateLimiter.consume(this.platform, 'upload', 1);
+          return this.httpService
+            .post('https://api.linkedin.com/v2/assets?action=registerUpload', {
+              registerUploadRequest: {
+                owner: personUrn,
+                recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+                serviceRelationships: [
+                  {
+                    relationshipType: 'OWNER',
+                    identifier: 'urn:li:userGeneratedContent',
+                  },
+                ],
+              },
+            }, {
+              headers: {
+                'Authorization': `Bearer ${credentials.accessToken}`,
+                'Content-Type': 'application/json',
+              },
+            })
+            .toPromise();
+        },
+        PLATFORM_RETRY_CONFIGS.linkedin,
+        isRetryableError
+      );
+
+      const uploadUrl = registerResponse.data.value.uploadMechanism['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'].uploadUrl;
+      const assetUrn = registerResponse.data.value.asset;
+      this.logger.debug('LinkedInAdapter: Upload URL obtained', { uploadUrl, assetUrn });
+
+      // Step 2: Upload binary directly to the upload URL (usually S3 pre-signed)
+      await withRetry(
+        async () => {
+          await axios.put(uploadUrl, imageBuffer, {
+            headers: {
+              'Content-Type': contentType,
+            },
+            // No auth needed; URL is pre-signed
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          });
+        },
+        { maxAttempts: 3, baseDelayMs: 1000, maxDelayMs: 10000 },
+        isRetryableError
+      );
+
+      this.logger.log('LinkedInAdapter: Image upload successful', { assetUrn });
+      return assetUrn;
+    } catch (error: any) {
+      this.logger.error('LinkedInAdapter: Image upload failed', {
+        platform: this.platform,
+        error: error.message,
+        response: error.response?.data,
+      });
+      return null;
+    }
   }
 }

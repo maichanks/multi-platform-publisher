@@ -8,15 +8,18 @@ import {
   Delete,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import { WorkspacesService } from './workspaces.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
+import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
 
 @Controller('workspaces')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard)
 export class WorkspacesController {
   constructor(private readonly workspacesService: WorkspacesService) {}
 
@@ -79,5 +82,37 @@ export class WorkspacesController {
   @PermissionChecker('CONTENT_READ')
   async getMembers(@Param('workspaceId') workspaceId: string, @Req() req) {
     return this.workspacesService.getMembers(workspaceId, req.user.id);
+  }
+
+  @Put(':workspaceId/members/:userId/role')
+  @PermissionChecker('member:update_role')
+  async updateMemberRole(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+    @Body() updateMemberRoleDto: UpdateMemberRoleDto,
+    @Req() req,
+  ) {
+    return this.workspacesService.updateMemberRole(
+      workspaceId,
+      userId,
+      updateMemberRoleDto,
+      req.user.id,
+    );
+  }
+
+  @Get(':workspaceId/activity')
+  @PermissionChecker('CONTENT_READ')
+  async getWorkspaceActivity(
+    @Param('workspaceId') workspaceId: string,
+    @Req() req,
+    @Query('limit') limit?: number,
+    @Query('before') before?: string,
+  ) {
+    return this.workspacesService.getWorkspaceActivity(
+      workspaceId,
+      req.user.id,
+      limit,
+      before,
+    );
   }
 }

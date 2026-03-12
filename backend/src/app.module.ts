@@ -14,10 +14,13 @@ import { ComplianceModule } from './modules/compliance/compliance.module';
 import { AiAdaptationModule } from './modules/ai-adaptation/ai-adaptation.module';
 import { PlatformsModule } from './modules/platforms/platforms.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { TenantsModule } from './modules/tenants/tenants.module';
 import { RedisCacheModule } from './modules/common/redis-cache.module';
 import { RateLimitModule } from './modules/common/rate-limit.module';
+import { CacheService } from './modules/common/services/cache.service';
 import { ConfigService } from './config/config.service';
 import { LoggerService } from './common/logger/logger.service';
+import { RateLimitGuard } from './modules/common/rate-limit.guard';
 
 @Module({
   imports: [
@@ -131,6 +134,7 @@ import { LoggerService } from './common/logger/logger.service';
     AiAdaptationModule,
     PlatformsModule,
     WebhooksModule,
+    TenantsModule,
 
     // Common modules
     RateLimitModule,
@@ -138,6 +142,11 @@ import { LoggerService } from './common/logger/logger.service';
   providers: [
     ConfigService,
     LoggerService,
+    CacheService,
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
+    },
   ],
 })
 export class AppModule {}

@@ -6,16 +6,24 @@ import {
   Req,
   ParseIntPipe,
   Param,
+  Post,
+  Body,
+  Header,
 } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
 import { PermissionsGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionChecker } from '../auth/decorators/permission.decorator';
 
 @Controller('analytics')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
+
+  private getTenantId(req: any): string {
+    return req.tenant?.id;
+  }
 
   @Get('daily')
   @PermissionChecker('ANALYTICS_READ')
@@ -32,6 +40,7 @@ export class AnalyticsController {
       new Date(startDate),
       new Date(endDate),
       platform,
+      this.getTenantId(req),
     );
 
     return { success: true, data: metrics };
@@ -48,9 +57,65 @@ export class AnalyticsController {
       workspaceId || req.user.defaultWorkspaceId,
       req.user.id,
       days || 30,
+      this.getTenantId(req),
     );
 
     return { success: true, data: summary };
+  }
+
+  @Get('engagement-rates')
+  @PermissionChecker('ANALYTICS_READ')
+  async getEngagementRates(
+    @Query('workspaceId') workspaceId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Req() req: any,
+  ) {
+    const rates = await this.analyticsService.getEngagementRates(
+      workspaceId || req.user.defaultWorkspaceId,
+      req.user.id,
+      new Date(startDate),
+      new Date(endDate),
+      this.getTenantId(req),
+    );
+
+    return { success: true, data: rates };
+  }
+
+  @Get('platform-comparison')
+  @PermissionChecker('ANALYTICS_READ')
+  async getPlatformComparison(
+    @Query('workspaceId') workspaceId: string,
+    @Query('days') days?: number,
+    @Req() req: any,
+  ) {
+    const comparison = await this.analyticsService.getPlatformComparison(
+      workspaceId || req.user.defaultWorkspaceId,
+      req.user.id,
+      days || 30,
+      this.getTenantId(req),
+    );
+
+    return { success: true, data: comparison };
+  }
+
+  @Get('trends')
+  @PermissionChecker('ANALYTICS_READ')
+  async getTrendAnalysis(
+    @Query('workspaceId') workspaceId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Req() req: any,
+  ) {
+    const trends = await this.analyticsService.getTrendAnalysis(
+      workspaceId || req.user.defaultWorkspaceId,
+      req.user.id,
+      new Date(startDate),
+      new Date(endDate),
+      this.getTenantId(req),
+    );
+
+    return { success: true, data: trends };
   }
 
   @Get('top-content')
@@ -94,6 +159,7 @@ export class AnalyticsController {
       eventData.sessionId,
       req.ip,
       req.headers['user-agent'],
+      this.getTenantId(req),
     );
 
     return { success: true, data: event };
@@ -101,34 +167,21 @@ export class AnalyticsController {
 
   @Get('export')
   @PermissionChecker('ANALYTICS_EXPORT')
-  async exportData(
+  @Header('Content-Type', 'text/csv')
+  async exportCSV(
     @Query('workspaceId') workspaceId: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
     @Req() req: any,
   ) {
-    const daily = await this.analyticsService.getDailyMetrics(
+    const csv = await this.analyticsService.exportToCSV(
       workspaceId || req.user.defaultWorkspaceId,
       req.user.id,
       new Date(startDate),
       new Date(endDate),
+      this.getTenantId(req),
     );
 
-    // Return CSV format
-    const csvHeaders = ['Date', 'Platform', 'Posts', 'Engagement'];
-    const csvRows = daily.map(d => [
-      d.date.toISOString().split('T')[0],
-      d.platform || 'all',
-      d.postsCount,
-      JSON.stringify(d.engagement),
-    ]);
-
-    const csv = [csvHeaders.join(','), ...csvRows.map(r => r.join(','))].join('\n');
-
-    return {
-      success: true,
-      data: csv,
-      filename: `analytics-${workspaceId}-${startDate}-to-${endDate}.csv`,
-    };
+    return csv; // raw CSV string, will be sent as response body
   }
 }

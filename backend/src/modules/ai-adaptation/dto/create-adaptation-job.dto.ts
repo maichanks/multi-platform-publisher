@@ -1,6 +1,20 @@
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsBoolean } from 'class-validator';
+
 export class CreateAdaptationJobDto {
+  @IsString()
+  @IsNotEmpty()
   contentId: string;
+
+  @IsString()
+  @IsNotEmpty()
   workspaceId: string;
-  platforms?: string[]; // if empty, use content.targetPlatforms
-  force?: boolean; // rerun even if already adapted
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  platforms?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
 }
