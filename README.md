@@ -12,7 +12,11 @@
 
 **Status**: Release Candidate (v1.0.0-rc.1) | **License**: MIT | **Author**: maichanks
 
-An enterprise-grade multi-platform content publishing platform with team collaboration, analytics, and compliance. Designed to work as an MCP (Model Context Protocol) service for OpenClaw.
+> ⚡ **One-Click Deploy (Backend)**: `curl -fsSL https://raw.githubusercontent.com/maichanks/multi-platform-publisher/main/deploy.js -o deploy.js && node deploy.js`
+>
+> 企业级多平台内容发布平台，支持团队协作、权限管理、数据分析，并作为 OpenClaw 的 MCP 服务。一键部署 Mock 后端，快速体验完整功能。
+
+**🏢 企业级功能** | 👥 团队协作 | 📊 数据分析 | 🔌 MCP 原生支持 | 🆓 MIT
 
 ### Key Features
 
@@ -22,6 +26,21 @@ An enterprise-grade multi-platform content publishing platform with team collabo
 - Analytics dashboard with CSV export
 - Rate limiting, tenant isolation, audit logs
 - RESTful API for MCP integration
+
+### 🚀 One-Click Deploy (Backend)
+
+Run the automated deployment script for the backend service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/maichanks/multi-platform-publisher/main/deploy.js -o deploy.js && node deploy.js
+```
+
+This clones the repo, installs backend dependencies, and creates the `.env` file.
+
+For full setup (frontend + backend), see **OpenClaw Integration** section below.
+
+---
+
 
 ### Quick Start (Local Dev)
 
@@ -161,3 +180,24 @@ openclaw cron add \
   --session isolated \
   --message "node $HOME/.openclaw/workspace/skills/my-publisher-skill/index.js"
 ```
+
+---
+
+## 📝 Keywords
+
+`openclaw`, `mcp`, `multi-platform`, `publishing`, `social-media`, `twitter`, `xiaohongshu`, `linkedin`, `reddit`, `rbac`, `multi-tenant`, `analytics`, `compliance`, `content-management`
+
+---
+
+## 🔗 Related OpenClaw Projects
+
+- [Smart Digest](https://github.com/maichanks/smart-digest) - AI-powered news digest for OpenClaw
+- [OpenClaw GitHub Trending Notifier](https://github.com/maichanks/openclaw-github-trending) - GitHub trending notifier
+- [Security Hardening for OpenClaw](https://github.com/maichanks/security-hardening) - Security hardening toolkit
+- [LLM Cost Optimizer](https://github.com/maichanks/llm-cost-optimizer) - LLM cost monitoring and optimization
+
+---
+
+## 📄 License
+
+MIT © 2026 maichanks <hankan1993@gmail.com>
